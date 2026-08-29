@@ -40,9 +40,9 @@ Drop a `*.nix` file into `printers/`, `filaments/`, or `prints/` and it's picked
 nix run github:cpederkoff/slicer-profiles-nix#import-profiles -- \
   --config-dir ~/.config/PrusaSlicer --out ./home/slicer-profiles
 ```
-Ports every `printer`/`filament`/`print` `.ini` under `--config-dir` into `--out`'s scaffold, one file per profile, fields flattened as-is (not diffed against a vendor bundle). Profiles that had an `inherits =` get a commented hint showing how to replace the flattened fields with a `vendorBundles` lookup once you've wired up `vendorSrc`. Never touches `physical_printer/*.ini` - see [What this doesn't manage](#what-this-doesnt-manage).
+Ports every `printer`/`filament`/`print` `.ini` under `--config-dir` into `--out`'s scaffold, one file per profile, fields flattened as-is (not diffed against a vendor bundle) and layered through `mergeAttrsListAndWarn` alongside the directory's shared `_common.nix`. Never touches `physical_printer/*.ini` - see [What this doesn't manage](#what-this-doesnt-manage).
 
-Pass `--vendor-src` (same directory shape as [Use a vendor-bundle preset](#use-a-vendor-bundle-preset)) and the hint fills in the real vendor name - `vendorBundles.Voron` instead of a `<Vendor>` placeholder - whenever exactly one vendor file has a matching section. PrusaSlicer's saved profiles don't record which vendor they came from, so this is a best-effort search, not a guarantee.
+Pass `--vendor-src` (same directory shape as [Use a vendor-bundle preset](#use-a-vendor-bundle-preset)) and, whenever a profile's `inherits =` resolves to exactly one vendor file's matching section, that `vendorBundles` lookup is added as a real layer too - so once `vendorSrc` is wired up on the Nix side, `mergeAttrsListAndWarn`'s own warning tells you which of the flattened fields below it are redundant and safe to delete. Without `--vendor-src`, or when a name is ambiguous or unmatched, the lookup is still written out but commented, with a `<Vendor>` placeholder to fill in by hand. PrusaSlicer's saved profiles don't record which vendor they came from, so this is a best-effort search, not a guarantee.
 
 If PrusaSlicer is installed via Nix, point `--vendor-src` straight at the package's bundled profiles instead of pinning a separate source:
 ```bash

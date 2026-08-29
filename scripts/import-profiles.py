@@ -7,20 +7,19 @@ drops straight into a scaffold's printers/filaments/prints directories.
 Profiles are ported as fully flattened field lists, not diffed against a
 vendor bundle - PrusaSlicer already writes every field explicit in each
 saved profile, `inherits` included, so flattening is always correct even
-if the referenced parent isn't ported too. When a source profile has an
-`inherits`, the generated file also gets a commented hint pointing at the
-real mergeAttrsListAndWarn shape (a vendorBundles lookup plus this
-directory's shared "_common.nix") - left commented because applying it
-would mean diffing the flattened fields against a specific vendor bundle
-version, which the importer won't guess at. If --vendor-src is given (a
-directory of <Vendor>.ini files, same shape as the Nix side's vendorSrc),
-the hint's `<Vendor>` placeholder gets filled in with the real vendor name
-whenever exactly one vendor file has a "[type:inherits-value]" section
-matching it - PrusaSlicer's own saved profiles don't record which vendor
-bundle they came from, so this is a best-effort search, not a guarantee.
-Each output directory also gets an empty "_common.nix" stub (skipped by
-scanDir, kept only if missing) - move whatever fields turn out to be
-shared across sibling profiles into it by hand.
+if the referenced parent isn't ported too. Every generated profile layers
+its fields through mergeAttrsListAndWarn alongside this directory's shared
+"_common.nix" (an empty stub, skipped by scanDir, kept only if missing -
+move whatever turns out to be shared across sibling profiles into it by
+hand). When a source profile has an `inherits`, that list also gets a
+vendorBundles lookup: active if --vendor-src (a directory of <Vendor>.ini
+files, same shape as the Nix side's vendorSrc) resolves it to exactly one
+vendor file's "[type:inherits-value]" section, otherwise commented out
+with a <Vendor> placeholder - PrusaSlicer's own saved profiles don't
+record which vendor bundle they came from, so this is a best-effort
+search, not a guarantee. Once vendorSrc is wired up on the Nix side too,
+mergeAttrsListAndWarn's own warning will point out which of the flattened
+fields already match the vendor default and are safe to delete.
 """
 
 import argparse
@@ -103,32 +102,32 @@ def slugify(name: str) -> str:
     return slug or "profile"
 
 
-def inherits_hint(section_prefix: str, inherits: str, vendor: str | None) -> str:
-    vendor_ref = vendor or "<Vendor>"
-    resolved_line = f"  # Found it in vendorBundles.{vendor}.\n" if vendor else ""
-    return (
-        "\n"
-        f'  # PrusaSlicer had this as "inherits = {inherits}".\n'
-        f"{resolved_line}"
-        '  # If you set up vendorSrc (see README: "Use a vendor-bundle preset"),\n'
-        "  # you may be able to replace the fields below with just your\n"
-        "  # overrides, layered on the vendor profile and this directory's\n"
-        "  # shared _common.nix:\n"
-        "  #   slicerLib.mergeAttrsListAndWarn [\n"
-        f'  #     (slicerLib.vendorBundles.{vendor_ref} "{section_prefix}:{inherits}")\n'
-        "  #     (import ./_common.nix)\n"
-        "  #     { ...your overrides... }\n"
-        "  #   ]\n"
-    )
-
-
-def render(name: str, fields: dict[str, str], section_prefix: str, vendor_index: VendorIndex) -> str:
-    hint = ""
+def render(name: str, fields: dict[str, str], section_prefix: str, vendor: str | None) -> str:
+    # Always layered through mergeAttrsListAndWarn - a vendor bundle call
+    # (active if resolve_vendor found exactly one match, commented out with
+    # a <Vendor> placeholder otherwise) plus this directory's _common.nix,
+    # so the redundancy warning can point out which flattened fields below
+    # already match the vendor default once vendorSrc is wired up.
+    layers = []
     if "inherits" in fields:
-        vendor = resolve_vendor(vendor_index, section_prefix, fields["inherits"])
-        hint = inherits_hint(section_prefix, fields["inherits"], vendor)
-    body = "\n".join(f"    {key} = {nix_value(value)};" for key, value in sorted(fields.items()))
-    return f"{{ slicerLib }}:\n{{\n  name = {nix_string(name)};{hint}\n  value = {{\n{body}\n  }};\n}}\n"
+        vendor_ref = vendor or "<Vendor>"
+        vendor_call = f'(slicerLib.vendorBundles.{vendor_ref} "{section_prefix}:{fields["inherits"]}")'
+        layers.append(vendor_call if vendor else f"# {vendor_call}")
+    layers.append("(import ./_common.nix)")
+
+    field_lines = "\n".join(f"      {key} = {nix_value(value)};" for key, value in sorted(fields.items()))
+    layers.append(f"{{\n{field_lines}\n    }}")
+
+    layers_text = "\n".join(f"    {layer}" for layer in layers)
+    return (
+        "{ slicerLib }:\n"
+        "{\n"
+        f"  name = {nix_string(name)};\n"
+        "  value = slicerLib.mergeAttrsListAndWarn [\n"
+        f"{layers_text}\n"
+        "  ];\n"
+        "}\n"
+    )
 
 
 def common_stub() -> str:
@@ -152,10 +151,11 @@ def write_common_stub(out_dir: Path, dry_run: bool) -> None:
 
 def port_type(
     section_prefix: str, src_dir: Path, out_dir: Path, dry_run: bool, vendor_index: VendorIndex
-) -> int:
+) -> tuple[int, int]:
     write_common_stub(out_dir, dry_run)
 
     count = 0
+    resolved = 0
     used_slugs: set[str] = set()
     for ini_file in sorted(src_dir.glob("*.ini")):
         name = ini_file.stem
@@ -163,6 +163,12 @@ def port_type(
         if not fields:
             print(f"warning: no fields parsed from {ini_file}, skipping", file=sys.stderr)
             continue
+
+        vendor = None
+        if "inherits" in fields:
+            vendor = resolve_vendor(vendor_index, section_prefix, fields["inherits"])
+            if vendor:
+                resolved += 1
 
         slug = candidate = slugify(name)
         n = 2
@@ -175,9 +181,9 @@ def port_type(
         print(f"{ini_file} -> {out_path}")
         if not dry_run:
             out_dir.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(render(name, fields, section_prefix, vendor_index), encoding="utf-8")
+            out_path.write_text(render(name, fields, section_prefix, vendor), encoding="utf-8")
         count += 1
-    return count
+    return count, resolved
 
 
 def main() -> None:
@@ -224,25 +230,23 @@ def main() -> None:
     vendor_index = build_vendor_index(args.vendor_src) if args.vendor_src else {}
 
     total = 0
+    resolved_total = 0
     for src_name in requested:
         src_dir = args.config_dir / src_name
         if not src_dir.is_dir():
             print(f"warning: {src_dir} not found, skipping", file=sys.stderr)
             continue
-        total += port_type(
+        count, resolved = port_type(
             src_name, src_dir, args.out / TYPE_DIRS[src_name], args.dry_run, vendor_index
         )
-
-    physical_printer = args.config_dir / "physical_printer"
-    if physical_printer.is_dir() and any(physical_printer.glob("*.ini")):
-        print(
-            f"note: not touching {physical_printer} - it holds host + API key secrets, "
-            "let the GUI manage it directly",
-            file=sys.stderr,
-        )
+        total += count
+        resolved_total += resolved
 
     verb = "would port" if args.dry_run else "ported"
-    print(f"{verb} {total} profile(s) into {args.out}")
+    summary = f"{verb} {total} profile(s) into {args.out}"
+    if args.vendor_src:
+        summary += f" ({resolved_total} inherits resolved to a vendor bundle)"
+    print(summary)
 
 
 if __name__ == "__main__":

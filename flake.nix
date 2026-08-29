@@ -222,11 +222,12 @@
 
                 profile="$out/printers/my_printer_test.nix"
                 test -f "$profile"
+                grep -qF 'value = slicerLib.mergeAttrsListAndWarn [' "$profile"
+                grep -qF '# (slicerLib.vendorBundles.<Vendor> "printer:Some Vendor Printer")' "$profile"
+                grep -qF '(import ./_common.nix)' "$profile"
                 grep -qF 'nozzle_diameter = "0.4";' "$profile"
                 grep -qF 'retract_length = 5;' "$profile"
                 grep -qF 'start_gcode = "G28\\nG1 Z5\\n\"quoted\"";' "$profile"
-                grep -qF 'vendorBundles.<Vendor> "printer:Some Vendor Printer"' "$profile"
-                grep -qF 'import ./_common.nix' "$profile"
               '';
 
           import-profiles-vendor-resolves =
@@ -238,8 +239,9 @@
                 import-profiles --config-dir ${importProfilesFixture} --vendor-src ${importProfilesVendorFixture} --out $out
 
                 profile="$out/printers/my_printer_test.nix"
-                grep -qF 'vendorBundles.TestVendor "printer:Some Vendor Printer"' "$profile"
-                grep -qF 'Found it in vendorBundles.TestVendor.' "$profile"
+                grep -qF '    (slicerLib.vendorBundles.TestVendor "printer:Some Vendor Printer")' "$profile"
+                # resolved - must NOT be commented out
+                ! grep -qF '# (slicerLib.vendorBundles' "$profile"
               '';
         }
       );
