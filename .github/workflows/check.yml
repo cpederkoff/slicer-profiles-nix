@@ -1,0 +1,17 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  flake-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned commit (v22), not @main - avoid a moving CI-action ref.
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+      # No --all-systems: this runner can't build aarch64-darwin at all, or
+      # aarch64-linux without emulation. Default check covers what it can.
+      - run: nix flake check
+      - run: nix fmt -- --check .

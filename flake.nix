@@ -2,31 +2,171 @@
   description = "Declarative PrusaSlicer-format (ini) printer/filament/print-quality profile management for Home Manager, with vendor-bundle inheritance and dead-field warnings.";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Dev-tooling only (checks/formatter) - the module takes `lib` from its
+    # caller, not nixpkgs directly. Consumers should `follows` this input.
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs =
+    { self, nixpkgs }:
     let
-      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      # x86_64-darwin omitted - dropped by this nixpkgs pin.
+      forAllSystems = nixpkgs.lib.genAttrs [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+      ];
     in
     {
-      homeManagerModules.default = import ./default.nix;
-      # Alias for the newer home-manager module naming convention.
-      homeModules.default = self.homeManagerModules.default;
+      # homeModules is current convention (parity with nixosModules/
+      # darwinModules); homeManagerModules is a back-compat alias.
+      homeModules.default = import ./default.nix;
+      homeManagerModules.default = self.homeModules.default;
 
-      # Exposes the generic ini/vendor-bundle tooling standalone, for
-      # building your own profiles.nix (see README) outside of this
-      # module's own option surface.
-      lib.mkProfileLib = { lib }: import ./lib.nix { inherit lib; };
+      # Generic ini/vendor tooling (see README) - no app knowledge. vendorSrc
+      # is optional: a directory of "<Vendor>.ini" files (a source-tree pin
+      # or `${pkgs.<slicer>}/share/...` both work identically); when given,
+      # its bundles show up pre-attached at `.vendorBundles`.
+      lib.mkProfileLib =
+        {
+          lib,
+          vendorSrc ? null,
+        }:
+        let
+          base = import ./lib.nix { inherit lib; };
+        in
+        base // lib.optionalAttrs (vendorSrc != null) { vendorBundles = base.mkVendorBundles vendorSrc; };
 
-      checks = forAllSystems (system:
+      templates.default = {
+        path = ./templates/default;
+        description = "slicerProfiles scaffold: profiles.nix scanning printers/filaments/prints, plus one example file in each";
+      };
+
+      formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt);
+
+      checks = forAllSystems (
+        system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          evaled = pkgs.lib.evalModules { modules = [ self.homeManagerModules.default ]; };
-        in {
+
+          # home-manager itself defines xdg.configFile - stub it so the
+          # module evaluates without depending on home-manager.
+          xdgConfigFileStub = { lib, ... }: {
+            options.xdg.configFile = lib.mkOption {
+              type = lib.types.attrsOf lib.types.anything;
+              default = { };
+            };
+          };
+          evaled = pkgs.lib.evalModules {
+            modules = [
+              self.homeModules.default
+              xdgConfigFileStub
+            ];
+          };
+
+          # Fixture covers `inherits =` resolution, CRLF, and "key=value"
+          # (no space) - real vendor-bundle quirks the ini regex must handle.
+          slicerLib = self.lib.mkProfileLib { inherit (pkgs) lib; };
+          vendorFixture = pkgs.writeText "vendor-fixture.ini" (
+            "[printer:Base]\nnozzle_diameter = 0.4\r\nretract_length=0.8\r\n"
+            + "[printer:Child]\ninherits = Base\nnozzle_diameter = 0.6\n"
+          );
+          sections = slicerLib.parseVendorIni vendorFixture;
+          resolved = slicerLib.resolveVendorSection sections "printer:Child";
+          merged = slicerLib.mergeAttrsListAndWarn [
+            resolved
+            {
+              nozzle_diameter = "0.6";
+              extra = "1";
+            }
+          ];
+          rendered = slicerLib.toSlic3rIni merged;
+          renderedWithInt = slicerLib.toSlic3rIni {
+            filament_cost = 20;
+            filament_type = "PLA";
+          };
+
+          testProfile = {
+            name = "Test Printer (nix)";
+            value = slicerLib.mergeAttrsListAndWarn [ { nozzle_diameter = "0.4"; } ];
+          };
+
+          basePrinter = {
+            name = "Base Printer (nix)";
+            value = slicerLib.mergeAttrsListAndWarn [
+              {
+                nozzle_diameter = "0.4";
+                retract_length = "0.8";
+              }
+            ];
+          };
+          derivedPrinter = {
+            name = "Derived Printer (nix)";
+            value = slicerLib.mergeAttrsListAndWarn [
+              basePrinter.value
+              { nozzle_diameter = "0.6"; }
+            ];
+          };
+
+          vendorSrcFixture = pkgs.writeTextDir "TestVendor.ini" (
+            "[filament:Test Filament]\nfilament_type = PLA\n"
+          );
+          testBundle = slicerLib.mkVendorBundle vendorSrcFixture "TestVendor.ini";
+          testBundles = slicerLib.mkVendorBundles vendorSrcFixture;
+
+          # mkProfileLib without vendorSrc shouldn't grow a vendorBundles
+          # attr; with it, bundles should show up pre-attached.
+          slicerLibWithVendor = self.lib.mkProfileLib {
+            inherit (pkgs) lib;
+            vendorSrc = vendorSrcFixture;
+          };
+
+          libBehaviorOk =
+            assert
+              resolved == {
+                nozzle_diameter = "0.6";
+                retract_length = "0.8";
+              };
+            assert
+              merged == {
+                nozzle_diameter = "0.6";
+                retract_length = "0.8";
+                extra = "1";
+              };
+            assert rendered == "extra = 1\nnozzle_diameter = 0.6\nretract_length = 0.8\n";
+            assert renderedWithInt == "filament_cost = 20\nfilament_type = PLA\n";
+            assert !(slicerLib ? vendorBundles);
+            assert
+              slicerLibWithVendor.vendorBundles.TestVendor "filament:Test Filament" == {
+                filament_type = "PLA";
+              };
+            assert
+              builtins.listToAttrs [ testProfile ] == {
+                "Test Printer (nix)" = {
+                  nozzle_diameter = "0.4";
+                };
+              };
+            assert
+              derivedPrinter.value == {
+                nozzle_diameter = "0.6";
+                retract_length = "0.8";
+              };
+            assert testBundle "filament:Test Filament" == { filament_type = "PLA"; };
+            assert
+              testBundles.TestVendor "filament:Test Filament" == {
+                filament_type = "PLA";
+              };
+            true;
+        in
+        {
           module-evaluates = pkgs.runCommand "slicer-profiles-nix-module-evaluates" { } ''
             echo "configDir=${evaled.config.slicerProfiles.configDir}" > $out
           '';
-        });
+
+          lib-behaves-correctly = pkgs.runCommand "slicer-profiles-nix-lib-behaves-correctly" { } ''
+            echo "${pkgs.lib.boolToString libBehaviorOk}" > $out
+          '';
+        }
+      );
     };
 }
