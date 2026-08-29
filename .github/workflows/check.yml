@@ -15,3 +15,8 @@ jobs:
       # aarch64-linux without emulation. Default check covers what it can.
       - run: nix flake check
       - run: nix fmt -- --check .
+      # Lint + format-check the importer script (ruff.toml sets the line
+      # length). ruff comes from the CI registry's nixpkgs, not the flake pin
+      # - it's a dev tool, so a moving version is fine here.
+      - run: nix run nixpkgs#ruff -- check scripts/
+      - run: nix run nixpkgs#ruff -- format --check scripts/

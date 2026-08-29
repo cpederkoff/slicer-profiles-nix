@@ -207,9 +207,7 @@ def main() -> None:
         default=",".join(TYPE_DIRS),
         help=f"comma-separated source subdirectories to port (default: {','.join(TYPE_DIRS)})",
     )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="print what would be written, without writing"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="print what would be written, without writing")
     parser.add_argument(
         "--vendor-src",
         type=Path,

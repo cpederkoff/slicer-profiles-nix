@@ -24,7 +24,8 @@ imports = [ inputs.slicer-profiles-nix.homeModules.default ];
 **3. Back up, scaffold, and import**
 ```bash
 cp -r ~/.config/PrusaSlicer ~/.config/PrusaSlicer.bkp
-mkdir -p home/slicer-profiles && cd home/slicer-profiles
+mkdir -p home/slicer-profiles 
+cd home/slicer-profiles
 nix flake init -t github:cpederkoff/slicer-profiles-nix
 nix run github:cpederkoff/slicer-profiles-nix#import-profiles -- \
   --config-dir ~/.config/PrusaSlicer.bkp \
@@ -33,10 +34,17 @@ nix run github:cpederkoff/slicer-profiles-nix#import-profiles -- \
 ```
 
 **4. Wire it into your config**
+
+The flake needs to be in scope of the module that uses it. The simplest way is to reference `inputs` directly, which Home Manager passes to your modules when you use `extraSpecialArgs` (or `specialArgs` under a NixOS `home-manager.users.*`). If `inputs` isn't already threaded through, add `extraSpecialArgs = { inherit inputs; };` where you call `home-manager.lib.homeManagerConfiguration` (or set it on the NixOS module).
+
 ```nix
-{ lib, ... }:
+{ lib, pkgs, inputs, ... }:
 let
-  slicerLib = slicer-profiles-nix.lib.mkProfileLib { inherit lib; };
+  slicer-profiles-nix = inputs.slicer-profiles-nix;
+  slicerLib = slicer-profiles-nix.lib.mkProfileLib {
+    inherit lib;
+    vendorSrc = "${pkgs.prusa-slicer}/share/PrusaSlicer/profiles";
+  };
 in
 {
   imports = [ slicer-profiles-nix.homeModules.default ];

@@ -9,7 +9,14 @@ let
   mkIniValue =
     v:
     if builtins.isString v then
-      v
+      # A real newline breaks the flat "key = value" ini - gcode newlines
+      # must be authored as a literal "\n" (backslash-n, two chars), the way
+      # PrusaSlicer writes them. Catch the mistake here instead of silently
+      # emitting a corrupt profile.
+      if lib.hasInfix "\n" v then
+        throw "slicer-profiles-nix: value contains a real newline - gcode newlines must be a literal \"\\n\" (two chars, e.g. \"G28\\nG1 Z5\"), not an actual line break; got: ${v}"
+      else
+        v
     else if builtins.isInt v then
       toString v
     else

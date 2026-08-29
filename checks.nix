@@ -1,0 +1,225 @@
+# Flake checks, extracted from flake.nix to keep the manifest readable.
+# Called per-system as
+# `import ./checks.nix { inherit self pkgs importProfilesPkg; }`.
+{
+  self,
+  pkgs,
+  # The shared importer derivation (mkImportProfiles in flake.nix), reused
+  # here so the script isn't wrapped twice.
+  importProfilesPkg,
+}:
+
+let
+  lib = pkgs.lib;
+
+  # home-manager itself defines xdg.configFile - stub it so the module
+  # evaluates without depending on home-manager.
+  xdgConfigFileStub =
+    { lib, ... }:
+    {
+      options.xdg.configFile = lib.mkOption {
+        type = lib.types.attrsOf lib.types.anything;
+        default = { };
+      };
+    };
+  evaled = pkgs.lib.evalModules {
+    modules = [
+      self.homeModules.default
+      xdgConfigFileStub
+      { slicerProfiles.configDir = "TestSlicer"; }
+    ];
+  };
+
+  # Evaluate the scaffold template end-to-end: scanDir picks up the example
+  # files, mkProfileLib feeds them, and the whole thing must satisfy the
+  # module's option types. Guards the template users hit first from drifting
+  # out of sync with the lib/module interface.
+  templateSlicerLib = self.lib.mkProfileLib { inherit (pkgs) lib; };
+  templateProfiles = import ./templates/default/profiles.nix {
+    inherit (pkgs) lib;
+    slicerLib = templateSlicerLib;
+  };
+  templateEvaled = pkgs.lib.evalModules {
+    modules = [
+      self.homeModules.default
+      xdgConfigFileStub
+      { slicerProfiles = templateProfiles; }
+    ];
+  };
+
+  # Fixture for scripts/import-profiles.py: a decimal (must port as a
+  # string), a whole number (fine as an int), an `inherits =` (the commented
+  # vendorBundles hint), and gcode with a literal "\n" and embedded quotes
+  # (escaping the importer must round-trip).
+  importProfilesFixture = pkgs.writeTextDir "printer/My Printer (test).ini" (
+    "nozzle_diameter = 0.4\n"
+    + "retract_length = 5\n"
+    + "inherits = Some Vendor Printer\n"
+    + ''start_gcode = G28\nG1 Z5\n"quoted"''
+    + "\n"
+  );
+  # Vendor fixture for --vendor-src: a matching "[printer:Some Vendor
+  # Printer]" section the importer's hint should resolve by name.
+  importProfilesVendorFixture = pkgs.writeTextDir "TestVendor.ini" (
+    "[printer:Some Vendor Printer]\nnozzle_diameter = 0.4\n"
+  );
+
+  # Fixture covers `inherits =` resolution, CRLF, and "key=value" (no space)
+  # - real vendor-bundle quirks the ini regex must handle.
+  slicerLib = self.lib.mkProfileLib { inherit (pkgs) lib; };
+  vendorFixture = pkgs.writeText "vendor-fixture.ini" (
+    "[printer:Base]\nnozzle_diameter = 0.4\r\nretract_length=0.8\r\n"
+    + "[printer:Child]\ninherits = Base\nnozzle_diameter = 0.6\n"
+  );
+  sections = slicerLib.parseVendorIni vendorFixture;
+  resolved = slicerLib.resolveVendorSection sections "printer:Child";
+  merged = slicerLib.mergeAttrsListAndWarn [
+    resolved
+    {
+      nozzle_diameter = "0.6";
+      extra = "1";
+    }
+  ];
+  rendered = slicerLib.toSlic3rIni merged;
+  renderedWithInt = slicerLib.toSlic3rIni {
+    filament_cost = 20;
+    filament_type = "PLA";
+  };
+
+  testProfile = {
+    name = "Test Printer (nix)";
+    value = {
+      nozzle_diameter = "0.4";
+    };
+  };
+
+  basePrinter = {
+    name = "Base Printer (nix)";
+    value = slicerLib.mergeAttrsListAndWarn [
+      {
+        nozzle_diameter = "0.4";
+        retract_length = "0.8";
+      }
+    ];
+  };
+  derivedPrinter = {
+    name = "Derived Printer (nix)";
+    value = slicerLib.mergeAttrsListAndWarn [
+      basePrinter.value
+      { nozzle_diameter = "0.6"; }
+    ];
+  };
+
+  vendorSrcFixture = pkgs.writeTextDir "TestVendor.ini" (
+    "[filament:Test Filament]\nfilament_type = PLA\n"
+  );
+  testBundle = slicerLib.mkVendorBundle vendorSrcFixture "TestVendor.ini";
+  testBundles = slicerLib.mkVendorBundles vendorSrcFixture;
+
+  # mkProfileLib without vendorSrc shouldn't grow a vendorBundles attr; with
+  # it, bundles should show up pre-attached.
+  slicerLibWithVendor = self.lib.mkProfileLib {
+    inherit (pkgs) lib;
+    vendorSrc = vendorSrcFixture;
+  };
+
+  libBehaviorOk =
+    assert
+      resolved == {
+        nozzle_diameter = "0.6";
+        retract_length = "0.8";
+      };
+    assert
+      merged == {
+        nozzle_diameter = "0.6";
+        retract_length = "0.8";
+        extra = "1";
+      };
+    assert rendered == "extra = 1\nnozzle_diameter = 0.6\nretract_length = 0.8\n";
+    assert renderedWithInt == "filament_cost = 20\nfilament_type = PLA\n";
+    assert !(slicerLib ? vendorBundles);
+    assert
+      slicerLibWithVendor.vendorBundles.TestVendor "filament:Test Filament" == {
+        filament_type = "PLA";
+      };
+    assert
+      builtins.listToAttrs [ testProfile ] == {
+        "Test Printer (nix)" = {
+          nozzle_diameter = "0.4";
+        };
+      };
+    assert
+      derivedPrinter.value == {
+        nozzle_diameter = "0.6";
+        retract_length = "0.8";
+      };
+    assert testBundle "filament:Test Filament" == { filament_type = "PLA"; };
+    assert
+      testBundles.TestVendor "filament:Test Filament" == {
+        filament_type = "PLA";
+      };
+    # A real newline in a value must throw, not silently split the ini line.
+    assert !(builtins.tryEval (slicerLib.toSlic3rIni { start_gcode = "G28\nG1 Z5"; })).success;
+    # The literal "\n" form (backslash-n) is fine and renders unchanged.
+    assert
+      (slicerLib.toSlic3rIni { start_gcode = ''G28\nG1 Z5''; }) == ''
+        start_gcode = G28\nG1 Z5
+      '';
+    true;
+in
+{
+  module-evaluates = pkgs.runCommand "slicer-profiles-nix-module-evaluates" { } ''
+    echo "configDir=${evaled.config.slicerProfiles.configDir}" > $out
+  '';
+
+  # Force the template's rendered xdg.configFile so evaluation is actually
+  # demanded (evalModules is lazy); the example filament profile must show up.
+  template-evaluates = pkgs.runCommand "slicer-profiles-nix-template-evaluates" { } ''
+    ${lib.concatStringsSep "\n" (
+      lib.mapAttrsToList (
+        path: entry: "echo ${lib.escapeShellArg "${path}: ${entry.text}"}"
+      ) templateEvaled.config.xdg.configFile
+    )}
+    test "${templateEvaled.config.slicerProfiles.configDir}" = "YourSlicer"
+    echo "ok" > $out
+  '';
+
+  lib-behaves-correctly = pkgs.runCommand "slicer-profiles-nix-lib-behaves-correctly" { } ''
+    echo "${pkgs.lib.boolToString libBehaviorOk}" > $out
+  '';
+
+  import-profiles-works =
+    pkgs.runCommand "slicer-profiles-nix-import-profiles-works"
+      {
+        nativeBuildInputs = [ importProfilesPkg ];
+      }
+      ''
+        import-profiles --config-dir ${importProfilesFixture} --out $out
+
+        common="$out/printers/_common.nix"
+        test -f "$common"
+
+        profile="$out/printers/my_printer_test.nix"
+        test -f "$profile"
+        grep -qF 'value = slicerLib.mergeAttrsListAndWarn [' "$profile"
+        grep -qF '# (slicerLib.vendorBundles.<Vendor> "printer:Some Vendor Printer")' "$profile"
+        grep -qF '(import ./_common.nix)' "$profile"
+        grep -qF 'nozzle_diameter = "0.4";' "$profile"
+        grep -qF 'retract_length = 5;' "$profile"
+        grep -qF 'start_gcode = "G28\\nG1 Z5\\n\"quoted\"";' "$profile"
+      '';
+
+  import-profiles-vendor-resolves =
+    pkgs.runCommand "slicer-profiles-nix-import-profiles-vendor-resolves"
+      {
+        nativeBuildInputs = [ importProfilesPkg ];
+      }
+      ''
+        import-profiles --config-dir ${importProfilesFixture} --vendor-src ${importProfilesVendorFixture} --out $out
+
+        profile="$out/printers/my_printer_test.nix"
+        grep -qF '    (slicerLib.vendorBundles.TestVendor "printer:Some Vendor Printer")' "$profile"
+        # resolved - must NOT be commented out
+        ! grep -qF '# (slicerLib.vendorBundles' "$profile"
+      '';
+}

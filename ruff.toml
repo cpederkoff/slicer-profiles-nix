@@ -1,0 +1,4 @@
+# Matches the flakeIgnore = [ "E501" ] the importer is built with - a few
+# rendered f-string lines run long and reflowing them hurts readability more
+# than it helps.
+line-length = 110
