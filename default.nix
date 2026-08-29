@@ -21,12 +21,11 @@ in
   options.slicerProfiles = {
     configDir = lib.mkOption {
       type = lib.types.str;
-      default = "PrusaSlicer";
-      example = "SuperSlicer";
+      example = "PrusaSlicer";
       description = ''
         Path relative to `xdg.configHome` (follows $XDG_CONFIG_HOME).
-        Override for a fork with a different app directory name but the
-        same on-disk layout.
+        Set to whatever app directory name your Slic3r-derivative slicer
+        uses.
       '';
     };
 
@@ -45,8 +44,8 @@ in
       '';
       description = ''
         Profiles by output subdirectory. Each top-level key is a literal
-        directory under `configDir` (PrusaSlicer wants "printer"/
-        "filament"/"print" - this option doesn't enforce that). Within
+        directory under `configDir` (most Slic3r-derivative slicers want
+        "printer"/"filament"/"print" - this option doesn't enforce that). Within
         each, profiles are keyed by the exact UI name; values are flat
         ini-field attrsets of strings or ints - no floats, since Nix's
         `toString` mangles them (e.g. "0.4" becomes "0.400000"); author

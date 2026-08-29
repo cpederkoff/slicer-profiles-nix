@@ -4,11 +4,9 @@
 
 {
   name = "My PLA (nix)";
-  value = slicerLib.mergeAttrsListAndWarn [
-    {
-      filament_type = "PLA";
-      temperature = "210";
-      bed_temperature = "60";
-    }
-  ];
+  value = {
+    filament_type = "PLA";
+    temperature = "210";
+    bed_temperature = "60";
+  };
 }

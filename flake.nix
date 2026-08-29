@@ -1,5 +1,5 @@
 {
-  description = "Declarative PrusaSlicer-format (ini) printer/filament/print-quality profile management for Home Manager, with vendor-bundle inheritance and dead-field warnings.";
+  description = "Declarative Slic3r-derivative (ini) printer/filament/print-quality profile management for Home Manager, with vendor-bundle inheritance and dead-field warnings.";
 
   inputs = {
     # Dev-tooling only (checks/formatter) - the module takes `lib` from its
@@ -61,6 +61,7 @@
             modules = [
               self.homeModules.default
               xdgConfigFileStub
+              { slicerProfiles.configDir = "TestSlicer"; }
             ];
           };
 
@@ -88,7 +89,7 @@
 
           testProfile = {
             name = "Test Printer (nix)";
-            value = slicerLib.mergeAttrsListAndWarn [ { nozzle_diameter = "0.4"; } ];
+            value = { nozzle_diameter = "0.4"; };
           };
 
           basePrinter = {

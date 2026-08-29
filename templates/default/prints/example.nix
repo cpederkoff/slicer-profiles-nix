@@ -4,5 +4,5 @@
 
 {
   name = "0.2mm (nix)";
-  value = slicerLib.mergeAttrsListAndWarn [ { layer_height = "0.2"; } ];
+  value = { layer_height = "0.2"; };
 }

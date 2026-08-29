@@ -1,7 +1,6 @@
 { lib }:
 
-# Generic Slic3r-derivative ini tooling (PrusaSlicer, SuperSlicer, forks
-# with the same layout). No app/vendor/printer assumptions.
+# Generic Slic3r-derivative ini tooling. No app/vendor/printer assumptions.
 # `let ... in { }`, not `rec { }` - overriding one returned field can't
 # silently change what another field calls internally.
 let

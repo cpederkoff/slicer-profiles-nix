@@ -4,10 +4,8 @@
 
 {
   name = "My Printer (nix)";
-  value = slicerLib.mergeAttrsListAndWarn [
-    {
-      bed_shape = "0x0,250x0,250x210,0x210";
-      nozzle_diameter = "0.4";
-    }
-  ];
+  value = {
+    bed_shape = "0x0,250x0,250x210,0x210";
+    nozzle_diameter = "0.4";
+  };
 }

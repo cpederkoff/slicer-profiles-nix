@@ -21,11 +21,7 @@ in
 small `scanDir` helper (plain `builtins.readDir`, nothing from the
 library) - every `*.nix` file directly in each directory becomes a
 profile automatically, no list to maintain. Rename or add to the example
-files in each directory; delete the ones you don't need. Files starting
-with `_` are skipped by `scanDir` - use that for fields shared across
-profiles in the same directory (`import` them by relative path from
-whichever profile files need them); adjust the filter in `profiles.nix` if
-you'd rather use a different convention.
+files in each directory; delete the ones you don't need.
 
 For vendor-bundle presets (`slicerLib.vendorBundles.<Vendor> "printer:Name"`)
 and cross-profile layering (a profile's rendered `.value` as a layer in
