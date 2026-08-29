@@ -4,8 +4,8 @@ Manage Slic3r-derivative slicer profiles - printer, filament, print-quality, and
 ## Main Features
 * Profiles as plain Nix attrsets, rendered to read-only `.ini` files
 * Vendor-bundle presets via `inherits =` chain resolution
-* Warns (without failing the build) on fields that redundantly repeat an earlier layer
-* Works for any Slic3r-derivative fork (PrusaSlicer, SuperSlicer, ...) under a different `configDir`
+* Warns on fields that redundantly repeat an earlier layer
+* Works for any Slic3r-derivative fork (PrusaSlicer, SuperSlicer, ...)
 
 ## How to run
 ### Add as a flake input
