@@ -44,6 +44,25 @@
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt);
 
+      # `nix run .#import-profiles -- --config-dir ~/.config/PrusaSlicer --out
+      # ./home/slicer-profiles` - see README "Port existing profiles".
+      apps = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          import-profiles = {
+            type = "app";
+            program = "${
+              pkgs.writers.writePython3Bin "import-profiles" { flakeIgnore = [ "E501" ]; } (
+                builtins.readFile ./scripts/import-profiles.py
+              )
+            }/bin/import-profiles";
+          };
+        }
+      );
+
       checks = forAllSystems (
         system:
         let
@@ -64,6 +83,26 @@
               { slicerProfiles.configDir = "TestSlicer"; }
             ];
           };
+
+          # Fixture for scripts/import-profiles.py: a decimal (must port as
+          # a string), a whole number (fine as an int), an `inherits =` (the
+          # commented vendorBundles hint), and gcode with a literal "\n" and
+          # embedded quotes (escaping the importer must round-trip).
+          importProfilesPkg = pkgs.writers.writePython3Bin "import-profiles" { flakeIgnore = [ "E501" ]; } (
+            builtins.readFile ./scripts/import-profiles.py
+          );
+          importProfilesFixture = pkgs.writeTextDir "printer/My Printer (test).ini" (
+            "nozzle_diameter = 0.4\n"
+            + "retract_length = 5\n"
+            + "inherits = Some Vendor Printer\n"
+            + ''start_gcode = G28\nG1 Z5\n"quoted"''
+            + "\n"
+          );
+          # Vendor fixture for --vendor-src: a matching "[printer:Some Vendor
+          # Printer]" section the importer's hint should resolve by name.
+          importProfilesVendorFixture = pkgs.writeTextDir "TestVendor.ini" (
+            "[printer:Some Vendor Printer]\nnozzle_diameter = 0.4\n"
+          );
 
           # Fixture covers `inherits =` resolution, CRLF, and "key=value"
           # (no space) - real vendor-bundle quirks the ini regex must handle.
@@ -89,7 +128,9 @@
 
           testProfile = {
             name = "Test Printer (nix)";
-            value = { nozzle_diameter = "0.4"; };
+            value = {
+              nozzle_diameter = "0.4";
+            };
           };
 
           basePrinter = {
@@ -167,6 +208,39 @@
           lib-behaves-correctly = pkgs.runCommand "slicer-profiles-nix-lib-behaves-correctly" { } ''
             echo "${pkgs.lib.boolToString libBehaviorOk}" > $out
           '';
+
+          import-profiles-works =
+            pkgs.runCommand "slicer-profiles-nix-import-profiles-works"
+              {
+                nativeBuildInputs = [ importProfilesPkg ];
+              }
+              ''
+                import-profiles --config-dir ${importProfilesFixture} --out $out
+
+                common="$out/printers/_common.nix"
+                test -f "$common"
+
+                profile="$out/printers/my_printer_test.nix"
+                test -f "$profile"
+                grep -qF 'nozzle_diameter = "0.4";' "$profile"
+                grep -qF 'retract_length = 5;' "$profile"
+                grep -qF 'start_gcode = "G28\\nG1 Z5\\n\"quoted\"";' "$profile"
+                grep -qF 'vendorBundles.<Vendor> "printer:Some Vendor Printer"' "$profile"
+                grep -qF 'import ./_common.nix' "$profile"
+              '';
+
+          import-profiles-vendor-resolves =
+            pkgs.runCommand "slicer-profiles-nix-import-profiles-vendor-resolves"
+              {
+                nativeBuildInputs = [ importProfilesPkg ];
+              }
+              ''
+                import-profiles --config-dir ${importProfilesFixture} --vendor-src ${importProfilesVendorFixture} --out $out
+
+                profile="$out/printers/my_printer_test.nix"
+                grep -qF 'vendorBundles.TestVendor "printer:Some Vendor Printer"' "$profile"
+                grep -qF 'Found it in vendorBundles.TestVendor.' "$profile"
+              '';
         }
       );
     };

@@ -6,14 +6,16 @@ let
   args = { inherit slicerLib; };
 
   # Every *.nix file becomes a profile - add a file, it's picked up, no
-  # list to maintain.
+  # list to maintain. Files starting with "_" are skipped (e.g. "_common.nix",
+  # a shared attrset the profiles in this directory layer in, not a
+  # profile itself).
   scanDir =
     dir:
     let
       fileNames = lib.attrNames (
-        lib.filterAttrs (name: type: type == "regular" && lib.hasSuffix ".nix" name) (
-          builtins.readDir dir
-        )
+        lib.filterAttrs (
+          name: type: type == "regular" && lib.hasSuffix ".nix" name && !(lib.hasPrefix "_" name)
+        ) (builtins.readDir dir)
       );
     in
     map (fileName: import (dir + "/${fileName}") args) fileNames;

@@ -35,6 +35,23 @@ nix flake init -t github:cpederkoff/slicer-profiles-nix
 ```
 Drop a `*.nix` file into `printers/`, `filaments/`, or `prints/` and it's picked up automatically. See [templates/default/README.md](./templates/default/README.md).
 
+### Port existing profiles
+```bash
+nix run github:cpederkoff/slicer-profiles-nix#import-profiles -- \
+  --config-dir ~/.config/PrusaSlicer --out ./home/slicer-profiles
+```
+Ports every `printer`/`filament`/`print` `.ini` under `--config-dir` into `--out`'s scaffold, one file per profile, fields flattened as-is (not diffed against a vendor bundle). Profiles that had an `inherits =` get a commented hint showing how to replace the flattened fields with a `vendorBundles` lookup once you've wired up `vendorSrc`. Never touches `physical_printer/*.ini` - see [What this doesn't manage](#what-this-doesnt-manage).
+
+Pass `--vendor-src` (same directory shape as [Use a vendor-bundle preset](#use-a-vendor-bundle-preset)) and the hint fills in the real vendor name - `vendorBundles.Voron` instead of a `<Vendor>` placeholder - whenever exactly one vendor file has a matching section. PrusaSlicer's saved profiles don't record which vendor they came from, so this is a best-effort search, not a guarantee.
+
+If PrusaSlicer is installed via Nix, point `--vendor-src` straight at the package's bundled profiles instead of pinning a separate source:
+```bash
+nix run github:cpederkoff/slicer-profiles-nix#import-profiles -- \
+  --config-dir ~/.config/PrusaSlicer \
+  --vendor-src "$(nix build --no-link --print-out-paths nixpkgs#prusa-slicer)/share/PrusaSlicer/profiles" \
+  --out ./home/slicer-profiles
+```
+
 ### Use a vendor-bundle preset
 `vendorSrc` is any directory of `<Vendor>.ini` files - PrusaSlicer ships these in-tree under `resources/profiles`, so either a pinned checkout or the installed package works.
 
@@ -52,11 +69,11 @@ slicerLib = slicer-profiles-nix.lib.mkProfileLib {
 };
 ```
 
-From the installed `pkgs.prusa-slicer` package:
+From the installed `pkgs.prusa-slicer` package (note: no `resources/` here - the FHS install flattens it away):
 ```nix
 slicerLib = slicer-profiles-nix.lib.mkProfileLib {
   inherit lib;
-  vendorSrc = "${pkgs.prusa-slicer}/share/PrusaSlicer/resources/profiles";
+  vendorSrc = "${pkgs.prusa-slicer}/share/PrusaSlicer/profiles";
 };
 ```
 
