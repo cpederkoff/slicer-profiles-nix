@@ -18,9 +18,7 @@ cp -r ~/.config/PrusaSlicer ~/.config/PrusaSlicer.bkp
 
 **2. Scaffold the project**
 ```bash
-mkdir -p home/slicer-profiles
-cd home/slicer-profiles
-nix flake init -t github:cpederkoff/slicer-profiles-nix#bare
+nix flake new home/slicer-profiles -t github:cpederkoff/slicer-profiles-nix#bare
 ```
 
 **3. Generate the slicer's defaults, then import**
@@ -36,7 +34,7 @@ nix run github:cpederkoff/slicer-profiles-nix#import-profiles -- \
   --config-dir ~/.config/PrusaSlicer \
   --vendor-src "$prusaslicer/share/PrusaSlicer/profiles" \
   --defaults-src /tmp/prusaslicer-defaults.ini \
-  --out .
+  --out home/slicer-profiles
 ```
 
 **4. Set `configDir`**
