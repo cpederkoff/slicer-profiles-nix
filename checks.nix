@@ -231,7 +231,7 @@ in
 
         profile="$out/printers/my_printer_test.nix"
         test -f "$profile"
-        grep -qF 'name = "My Printer (test)";' "$profile"
+        grep -qF 'name = "My Printer (test) (nix)";' "$profile"
         # No --defaults-src here, so no defaults base layer is written or composed.
         ! test -e "$out/printers/_slicer_defaults.nix"
         ! grep -qF '_slicer_defaults.nix' "$profile"
