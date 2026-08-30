@@ -1,5 +1,4 @@
-# Shared by every profile in this directory - layer it into each profile's
-# mergeAttrsListAndWarn list via `(import ./_common.nix)`. Not a profile
-# itself - scanDir skips files starting with "_".
+# Shared by this directory's profiles via `(import ./_common.nix)`. Not a
+# profile itself - scanDir skips "_"-prefixed files.
 {
 }

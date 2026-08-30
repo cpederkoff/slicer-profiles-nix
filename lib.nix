@@ -95,8 +95,11 @@ let
   # redundantly repeats an earlier value. To skip the check on content you
   # don't control, merge it in as a floor instead of putting it in the list:
   # `base.value // mergeAttrsListAndWarn [ own1 own2 ]`.
-  mergeAttrsListAndWarn =
-    layers:
+  #
+  # An optional leading string labels the warning with the profile it came
+  # from: `mergeAttrsListAndWarn "My PLA (nix)" [ ... ]`.
+  mergeAttrsListAndWarnNamed =
+    label: layers:
     let
       step =
         acc: value:
@@ -106,7 +109,7 @@ let
             k: (acc.merged ? ${k}) && (mkIniValue value.${k}) == (mkIniValue acc.merged.${k})
           ) keys;
           describeLayer =
-            k: "`${k} = ${mkIniValue value.${k}}` already set to that value by an earlier layer";
+            k: "${k} = ${mkIniValue value.${k}}";
         in
         {
           merged = acc.merged // value;
@@ -116,11 +119,19 @@ let
         merged = { };
         warnings = [ ];
       } layers;
+      header =
+        "slicer-profiles-nix: redundant field overrides safe to delete"
+        + lib.optionalString (label != null) " in ${label}"
+        + ":";
     in
     if result.warnings == [ ] then
       result.merged
     else
-      lib.warn "slicer-profiles-nix: redundant field override(s), safe to delete:\n  ${lib.concatStringsSep "\n  " result.warnings}" result.merged;
+      lib.warn "${header}\n${lib.concatStringsSep "\n" result.warnings}" result.merged;
+
+  # A leading string is the label; a bare list stays unlabeled.
+  mergeAttrsListAndWarn =
+    arg: if builtins.isString arg then mergeAttrsListAndWarnNamed arg else mergeAttrsListAndWarnNamed null arg;
 in
 {
   inherit

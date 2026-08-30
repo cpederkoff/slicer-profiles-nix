@@ -50,7 +50,35 @@
         description = "slicerProfiles scaffold: profiles.nix scanning printers/filaments/prints, plus one example file in each";
       };
 
+      # Same scaffold without the example profiles - empty dirs for the
+      # import-profiles flow, so there are no placeholders to delete after.
+      templates.bare = {
+        path = ./templates/bare;
+        description = "slicerProfiles scaffold with no example profiles - empty dirs to fill with import-profiles";
+      };
+
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt);
+
+      # Reproducible dump of PrusaSlicer's compiled-in defaults, for
+      # `import-profiles --defaults-src`. Pinned to this flake's nixpkgs so it
+      # matches the vendor bundles you diff against.
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          prusaslicer-defaults =
+            pkgs.runCommand "prusaslicer-defaults.ini"
+              {
+                nativeBuildInputs = [ pkgs.prusa-slicer ];
+              }
+              ''
+                export HOME="$(mktemp -d)"
+                prusa-slicer --save "$out"
+              '';
+        }
+      );
 
       # `nix run .#import-profiles -- --config-dir ~/.config/PrusaSlicer --out
       # ./home/slicer-profiles` - see README "Port existing profiles".

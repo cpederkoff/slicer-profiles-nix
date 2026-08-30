@@ -17,9 +17,7 @@ in
 ```
 
 ### Add your own profiles
-Rename or add to the example files in `printers/`, `filaments/`, and `prints/` - every `*.nix` file dropped directly in one of those directories becomes a profile automatically. Delete the examples you don't need.
-
-`profiles.nix` scans each directory itself with a small `scanDir` helper (plain `builtins.readDir`, nothing from the library), so there's no list to maintain.
+Rename or add to the example files in `printers/`, `filaments/`, and `prints/`; every `*.nix` file dropped in one of those directories becomes a profile automatically (`profiles.nix` scans them, so there's no list to maintain). Delete the examples you don't need.
 
 ## What's next
 For vendor-bundle presets (`slicerLib.vendorBundles.<Vendor> "printer:Name"`) and cross-profile layering, see the main repo's [README](https://github.com/cpederkoff/slicer-profiles-nix).
