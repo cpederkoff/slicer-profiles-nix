@@ -36,6 +36,8 @@ TYPE_DIRS = {
 INT_RE = re.compile(r"^-?[0-9]+$")
 SECTION_RE = re.compile(r"^\[([a-zA-Z_]+):(.*)\]$")
 
+NAME_SUFFIX = " (nix)"
+
 VendorIndex = dict[tuple[str, str], list[str]]
 
 
@@ -305,7 +307,7 @@ def port_type(
     resolved = 0
     used_slugs: set[str] = set()
     for ini_file, fields in parsed:
-        name = ini_file.stem
+        name = ini_file.stem + NAME_SUFFIX
 
         vendor = None
         vendor_candidates: list[str] = []
@@ -325,7 +327,7 @@ def port_type(
         parent_known = "inherits" not in fields or vendor is not None
         own_fields = {k: v for k, v in fields.items() if is_own_field(k, v, baseline, parent_known)}
 
-        slug = candidate = slugify(name)
+        slug = candidate = slugify(ini_file.stem)
         n = 2
         while candidate in used_slugs:
             candidate = f"{slug}_{n}"

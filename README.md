@@ -70,7 +70,7 @@ in
 }
 ```
 
-Run `home-manager switch` and reopen your slicer - your profiles are there under their old names, now rendered as read-only files. See [What this doesn't manage](#what-this-doesnt-manage) before you delete the backup.
+Run `home-manager switch` and reopen your slicer - your profiles are there, each suffixed with ` (nix)` so it sits alongside the original rather than clobbering it, now rendered as read-only files. See [What this doesn't manage](#what-this-doesnt-manage) before you delete the backup.
 
 ## Other ways to use this
 ### Generate the scaffold without importing
