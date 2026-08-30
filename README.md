@@ -9,35 +9,29 @@ Manage Slic3r-derivative slicer profiles - printer, filament, print-quality, and
 * Works for any Slic3r-derivative fork (PrusaSlicer, SuperSlicer, ...)
 
 ## Quick start
-Already have profiles saved in PrusaSlicer (or a fork) and use Home Manager? This gets them under Nix in seven steps.
+Have profiles saved in PrusaSlicer (or another Slic3r fork like SuperSlicer) and use Home Manager? Manage them declaritively with nix!
 
 **1. Back up your profiles**
 ```bash
 cp -r ~/.config/PrusaSlicer ~/.config/PrusaSlicer.bkp
 ```
 
-**2. Add the flake input**
-```nix
-inputs.slicer-profiles-nix.url = "github:cpederkoff/slicer-profiles-nix";
-```
-
-**3. Import the module**
-```nix
-imports = [ inputs.slicer-profiles-nix.homeModules.default ];
-```
-
-**4. Scaffold the project**
+**2. Scaffold the project**
 ```bash
 mkdir -p home/slicer-profiles
 cd home/slicer-profiles
 nix flake init -t github:cpederkoff/slicer-profiles-nix#bare
 ```
 
-**5. Generate the slicer's defaults, then import**
+**3. Generate the slicer's defaults, then import**
 ```bash
 prusaslicer="$(nix build --no-link --print-out-paths nixpkgs#prusa-slicer)"
+
+# Dump the slicer's raw compiled defaults.
 HOME="$(mktemp -d)" "$prusaslicer/bin/prusa-slicer" --save /tmp/prusaslicer-defaults.ini
 
+# Convert your saved profiles into the scaffold's .nix files, keeping only what
+# differs from the vendor preset (--vendor-src) and defaults (--defaults-src).
 nix run github:cpederkoff/slicer-profiles-nix#import-profiles -- \
   --config-dir ~/.config/PrusaSlicer \
   --vendor-src "$prusaslicer/share/PrusaSlicer/profiles" \
@@ -45,20 +39,23 @@ nix run github:cpederkoff/slicer-profiles-nix#import-profiles -- \
   --out .
 ```
 
-The first line dumps PrusaSlicer's compiled defaults from a clean `HOME`, using the same `$prusaslicer` build as `--vendor-src` so the two agree (point both at the same version if you run a different one). Then `--vendor-src` starts each profile from the matching vendor preset and `--defaults-src` drops fields left at those defaults, so a saved profile imports as just its meaningful overrides. The dropped defaults aren't lost: the importer writes a `_slicer_defaults.nix` base layer into each of `printers/`, `filaments/`, and `prints/` that every profile there composes under its vendor/`_common`/own layers, so the rendered `.ini` still carries them - just tracked against an explicit base instead of copied into every file. Both flags are optional (drop them and every field is written out explicitly).
-
-**6. Set `configDir`**
+**4. Set `configDir`**
 
 The scaffolded `profiles.nix` ships with a placeholder. Set it to the same `~/.config` directory you've been using - `PrusaSlicer` above:
 ```nix
 configDir = "PrusaSlicer";
 ```
 
-**7. Wire it into your config**
+**5. Add the flake input**
+```nix
+inputs.slicer-profiles-nix.url = "github:cpederkoff/slicer-profiles-nix";
+```
 
-The flake needs to be in scope of the module that uses it. The simplest way is to reference `inputs` directly, which Home Manager passes to your modules when you use `extraSpecialArgs` (or `specialArgs` under a NixOS `home-manager.users.*`). If `inputs` isn't already threaded through, add `extraSpecialArgs = { inherit inputs; };` where you call `home-manager.lib.homeManagerConfiguration` (or set it on the NixOS module).
+**6. Wire it into your config**
 
 ```nix
+# Needs `inputs` in scope - thread it in via Home Manager's
+# `extraSpecialArgs = { inherit inputs; }` (or `specialArgs` under NixOS).
 { lib, pkgs, inputs, ... }:
 let
   slicer-profiles-nix = inputs.slicer-profiles-nix;
