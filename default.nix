@@ -1,7 +1,7 @@
-# Renders slicerProfiles.directories to real ini files.
-# Doesn't manage <app>.ini (GUI prefs) or physical_printer/*.ini (secrets).
-# Files are read-only store symlinks - "Save As" in the GUI to experiment,
-# then port changes back here.
+# Render slicerProfiles.directories to ini files.
+# Does not manage <app>.ini (GUI prefs) or physical_printer/*.ini (secrets).
+# Rendered files are read-only store symlinks. Use "Save As" in the GUI to
+# experiment, then port changes back here.
 { config, lib, ... }:
 
 let

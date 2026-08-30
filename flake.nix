@@ -1,9 +1,9 @@
 {
-  description = "Declarative Slic3r-derivative (ini) printer/filament/print-quality profile management for Home Manager, with vendor-bundle inheritance and dead-field warnings.";
+  description = "Declarative Slic3r-derivative (ini) printer/filament/print-quality profile management for Home Manager, with vendor-bundle inheritance and compiled-default base layers.";
 
   inputs = {
-    # Dev-tooling only (checks/formatter) - the module takes `lib` from its
-    # caller, not nixpkgs directly. Consumers should `follows` this input.
+    # Dev-tooling only (checks/formatter); the module takes `lib` from its
+    # caller, not nixpkgs directly. Consumers SHOULD `follows` this input.
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
   };
 

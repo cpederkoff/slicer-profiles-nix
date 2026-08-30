@@ -1,18 +1,23 @@
 """Port PrusaSlicer-format user profiles into this project's per-file Nix layout.
 
-Each source "<type>/<Name>.ini" file becomes "<outdir>/<name>.nix" with a
-`{ slicerLib }: { name; value; }` shape (matching templates/default/) so it
-drops straight into a scaffold's printers/filaments/prints directories.
+Each source "<type>/<Name>.ini" becomes "<outdir>/<name>.nix" with a
+`{ slicerLib }: { name; value; }` shape (matching templates/default/). It drops
+straight into a scaffold's printers/filaments/prints directories.
 
-With --vendor-src (a directory of <Vendor>.ini files, same shape as the Nix
-side's vendorSrc), a profile's `inherits` is resolved to the matching vendor
-section and fields already equal to it are dropped, so the import keeps only
-what differs. --defaults-src additionally drops fields equal to the slicer's
-compiled defaults (dump with `prusa-slicer --save defaults.ini`); vendor
-values win over defaults where both apply. Without a resolvable bundle nothing
-is dropped and the vendorBundles lookup is commented out with a <Vendor>
-placeholder. Every generated profile layers through mergeAttrsListAndWarn
-alongside this directory's shared "_common.nix" stub.
+--vendor-src takes a directory of <Vendor>.ini files (same shape as the Nix
+side's vendorSrc). A profile's `inherits` resolves to the matching vendor
+section; fields already equal to it are dropped, keeping only what differs.
+
+--defaults-src takes the slicer's compiled defaults (dump with
+`prusa-slicer --save defaults.ini`). Fields equal to a default are dropped too.
+The defaults are written as a per-directory "_slicer_defaults.nix" base layer
+that every profile composes under its vendor/_common/own layers, so dropped
+fields still render from an explicit base. Vendor values win over defaults.
+
+Without a resolvable bundle, nothing is dropped and the vendorBundles lookup is
+commented out with a <Vendor> placeholder; an ambiguous name (present in several
+bundles) lists its candidate bundles inline. Every profile composes its layers
+with plain `//`; later layers win.
 """
 
 import argparse
@@ -20,9 +25,8 @@ import re
 import sys
 from pathlib import Path
 
-# source subdirectory (under configDir) -> output subdirectory, matching the
-# flake template's printers/filaments/prints scaffold. Also doubles as the
-# "<type>:" prefix vendorBundles section lookups use.
+# Source subdir (under configDir) -> output subdir. The key also serves as the
+# "<type>:" prefix for vendorBundles section lookups.
 TYPE_DIRS = {
     "printer": "printers",
     "filament": "filaments",
@@ -36,9 +40,8 @@ VendorIndex = dict[tuple[str, str], list[str]]
 
 
 def build_vendor_index(vendor_src: Path) -> VendorIndex:
-    # Only section headers matter here (not full field/inherits resolution
-    # like the Nix side does) - we just need to know which vendor file(s)
-    # a "[type:name]" section lives in.
+    # Index section headers only: which vendor file(s) hold a given
+    # "[type:name]" section. Field/inherits resolution happens later.
     index: VendorIndex = {}
     for ini_file in sorted(vendor_src.glob("*.ini")):
         vendor_name = ini_file.stem
@@ -49,20 +52,25 @@ def build_vendor_index(vendor_src: Path) -> VendorIndex:
     return index
 
 
-def resolve_vendor(vendor_index: VendorIndex, section_prefix: str, inherits: str) -> str | None:
+def resolve_vendor(
+    vendor_index: VendorIndex, section_prefix: str, inherits: str
+) -> tuple[str | None, list[str]]:
+    # Return (resolved vendor, all candidates). The candidates let the renderer
+    # list the choices inline when the name is ambiguous.
     candidates = vendor_index.get((section_prefix, inherits), [])
     if len(candidates) == 1:
-        return candidates[0]
+        return candidates[0], candidates
     if len(candidates) > 1:
         print(
             f'warning: "{section_prefix}:{inherits}" found in multiple vendor bundles '
             f"({', '.join(candidates)}) - leaving <Vendor> placeholder",
             file=sys.stderr,
         )
-    return None
+    return None, candidates
 
 
-# Mirror lib.nix's parseVendorIni regexes (tolerating "key=value" and CRLF).
+# These MUST mirror lib.nix's parseVendorIni regexes (tolerate "key=value"
+# and CRLF).
 VENDOR_SECTION_RE = re.compile(r"^\[(.*)]$")
 VENDOR_KV_RE = re.compile(r"^([a-zA-Z0-9_]+) ?= ?(.*)$")
 VENDOR_TYPE_RE = re.compile(r"^([a-zA-Z_]+):")
@@ -86,7 +94,7 @@ def parse_vendor_ini(path: Path) -> dict[str, dict[str, str]]:
 def resolve_vendor_section(sections: dict[str, dict[str, str]], name: str) -> dict[str, str]:
     # Follow the `inherits = A;B` chain (parents first, own fields win), like
     # lib.nix's resolveVendorSection but lenient: a missing section/parent
-    # returns only what could be resolved rather than throwing.
+    # resolves to what it can, rather than throwing.
     section = sections.get(name)
     if section is None:
         return {}
@@ -108,7 +116,7 @@ def resolve_vendor_fields(
     section: str,
     cache: dict[str, dict[str, dict[str, str]]],
 ) -> dict[str, str]:
-    # Parse each vendor file at most once, no matter how many profiles inherit it.
+    # Parse each vendor file at most once, however many profiles inherit it.
     sections = cache.get(vendor_name)
     if sections is None:
         sections = parse_vendor_ini(vendor_src / f"{vendor_name}.ini")
@@ -117,17 +125,17 @@ def resolve_vendor_fields(
 
 
 def unset_canon(value: str) -> str:
-    # An unset nullable field is "nil" in saved profiles but "" from
-    # `prusa-slicer --save`; treat the two as equal so they dedupe.
+    # A nullable unset field is "nil" in saved profiles but "" from
+    # `prusa-slicer --save`. Treat them as equal so they dedupe.
     return "" if value == "nil" else value
 
 
 def is_own_field(key: str, value: str, baseline: dict[str, str], parent_known: bool) -> bool:
-    # True if the profile must keep this field, i.e. the rendered ini can't omit
-    # it. A field set by a lower layer (baseline) is redundant iff it matches.
-    # With no lower layer, an explicitly-unset field is redundant only when the
-    # layer beneath is known (resolved vendor chain, or no `inherits`);
-    # otherwise the parent might set it, so keep it.
+    # True when the profile MUST keep this field (the rendered ini cannot omit
+    # it). A field present in baseline is redundant iff it matches. With no
+    # baseline entry, an explicitly-unset field is redundant only when the layer
+    # beneath is known (resolved vendor chain, or no `inherits`); otherwise the
+    # parent might set it, so keep it.
     if key in baseline:
         return unset_canon(baseline[key]) != unset_canon(value)
     if unset_canon(value) == "" and parent_known:
@@ -149,17 +157,16 @@ def parse_profile(path: Path) -> dict[str, str]:
 
 
 def nix_string(value: str) -> str:
-    # Round-trips byte-for-byte through toSlic3rIni: escape backslashes and
-    # quotes so a literal "\n" (two chars, as PrusaSlicer writes gcode
-    # newlines) doesn't get reinterpreted as an actual newline by Nix.
+    # Escape backslashes and quotes so the value round-trips byte-for-byte
+    # through toSlic3rIni. A literal "\n" (two chars) MUST NOT become a real
+    # newline in Nix.
     escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("${", "\\${")
     return f'"{escaped}"'
 
 
 def nix_value(value: str) -> str:
-    # Bare integers can stay ints; everything else (decimals, "nil", hex
-    # colors, percentages, gcode) must be a string - Nix's toString on a
-    # float corrupts it ("0.400000"), so only whole numbers are safe as ints.
+    # Whole numbers stay ints; everything else MUST be a string. Nix's toString
+    # corrupts floats ("0.400000"), so only integers are safe unquoted.
     return value if INT_RE.match(value) else nix_string(value)
 
 
@@ -168,41 +175,92 @@ def slugify(name: str) -> str:
     return slug or "profile"
 
 
-def render(name: str, fields: dict[str, str], section_prefix: str, vendor: str | None) -> str:
-    # Always layered through mergeAttrsListAndWarn - a vendor bundle call
-    # (active if resolve_vendor found exactly one match, commented out with
-    # a <Vendor> placeholder otherwise) plus this directory's _common.nix,
-    # so the redundancy warning can point out which flattened fields below
-    # already match the vendor default once vendorSrc is wired up.
-    layers = []
+def render(
+    name: str,
+    fields: dict[str, str],
+    section_prefix: str,
+    vendor: str | None,
+    vendor_candidates: list[str],
+    has_defaults: bool,
+) -> str:
+    # Compose the layers with plain `//`; later layers win. Order:
+    # compiled-defaults base (only with --defaults-src), vendor bundle, this
+    # directory's _common.nix, then the profile's own fields on top. An
+    # unresolved vendor bundle is emitted as a bare comment the chain steps past;
+    # if the name is ambiguous across bundles, the candidates are listed inline.
+    #
+    # entries holds (kind, text): "layer" joins the `//` chain, "comment" is a
+    # plain line between layers.
+    entries: list[tuple[str, str]] = []
+    if has_defaults:
+        entries.append(("layer", "(import ./_slicer_defaults.nix)"))
     if "inherits" in fields:
-        vendor_ref = vendor or "<Vendor>"
-        vendor_call = f'(slicerLib.vendorBundles.{vendor_ref} "{section_prefix}:{fields["inherits"]}")'
-        layers.append(vendor_call if vendor else f"# {vendor_call}")
-    layers.append("(import ./_common.nix)")
+        section = f'{section_prefix}:{fields["inherits"]}'
+        if vendor:
+            entries.append(("layer", f'(slicerLib.vendorBundles.{vendor} "{section}")'))
+        else:
+            comment = f'# (slicerLib.vendorBundles.<Vendor> "{section}")'
+            if vendor_candidates:
+                comment += f"  # Replace <Vendor> with one of [{', '.join(vendor_candidates)}]"
+            entries.append(("comment", comment))
+    entries.append(("layer", "(import ./_common.nix)"))
+    if fields:
+        field_lines = "\n".join(f"      {key} = {nix_value(value)};" for key, value in sorted(fields.items()))
+        entries.append(("layer", "{\n" + field_lines + "\n    }"))
+    else:
+        entries.append(("layer", "{ }"))
 
-    field_lines = "\n".join(f"      {key} = {nix_value(value)};" for key, value in sorted(fields.items()))
-    layers.append(f"{{\n{field_lines}\n    }}")
+    body_lines: list[str] = []
+    first_layer = True
+    for kind, text in entries:
+        if kind == "comment":
+            body_lines.append(f"    {text}")
+            continue
+        prefix = "" if first_layer else "// "
+        first_layer = False
+        text_lines = text.split("\n")
+        body_lines.append(f"    {prefix}{text_lines[0]}")
+        body_lines.extend(text_lines[1:])
+    body = "\n".join(body_lines)
 
-    layers_text = "\n".join(f"    {layer}" for layer in layers)
     return (
         "{ slicerLib }:\n"
         "{\n"
         f"  name = {nix_string(name)};\n"
-        f"  value = slicerLib.mergeAttrsListAndWarn {nix_string(name)} [\n"
-        f"{layers_text}\n"
-        "  ];\n"
+        f"  value =\n{body};\n"
         "}\n"
     )
 
 
 def common_stub() -> str:
     return (
-        "# Shared by every profile in this directory - layer it into each\n"
-        "# profile's mergeAttrsListAndWarn list via `(import ./_common.nix)`.\n"
-        '# Not a profile itself - scanDir skips files starting with "_".\n'
+        "# Shared by this directory's profiles via `(import ./_common.nix)`. Not a\n"
+        '# profile itself - scanDir skips "_"-prefixed files.\n'
         "{\n}\n"
     )
+
+
+def render_defaults(layer: dict[str, str]) -> str:
+    field_lines = "\n".join(f"  {key} = {nix_value(value)};" for key, value in sorted(layer.items()))
+    body = f"\n{field_lines}\n" if field_lines else "\n"
+    return (
+        "# Compiled slicer defaults (from --defaults-src) for the fields this\n"
+        "# directory's profiles touch. Each profile's base layer, via\n"
+        "# `(import ./_slicer_defaults.nix)`; every layer above wins. Not a\n"
+        '# profile itself - scanDir skips "_"-prefixed files.\n'
+        f"{{{body}}}\n"
+    )
+
+
+def write_defaults_layer(
+    out_dir: Path, used_keys: set[str], default_fields: dict[str, str], dry_run: bool
+) -> None:
+    layer = {k: default_fields[k] for k in used_keys if k in default_fields}
+    path = out_dir / "_slicer_defaults.nix"
+    print(f"(defaults) -> {path}")
+    if not dry_run:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_defaults(layer), encoding="utf-8")
 
 
 def write_common_stub(out_dir: Path, dry_run: bool) -> None:
@@ -227,20 +285,33 @@ def port_type(
 ) -> tuple[int, int]:
     write_common_stub(out_dir, dry_run)
 
-    count = 0
-    resolved = 0
-    used_slugs: set[str] = set()
+    # Parse everything first so the defaults layer can cover the union of fields
+    # these profiles touch. The flat --defaults-src mixes printer/filament/print
+    # keys, so a per-directory layer MUST stay restricted to keys used here.
+    parsed = []
     for ini_file in sorted(src_dir.glob("*.ini")):
-        name = ini_file.stem
         fields = parse_profile(ini_file)
         if not fields:
             print(f"warning: no fields parsed from {ini_file}, skipping", file=sys.stderr)
             continue
+        parsed.append((ini_file, fields))
+
+    has_defaults = bool(default_fields) and bool(parsed)
+    if has_defaults:
+        used_keys = {key for _, fields in parsed for key in fields}
+        write_defaults_layer(out_dir, used_keys, default_fields, dry_run)
+
+    count = 0
+    resolved = 0
+    used_slugs: set[str] = set()
+    for ini_file, fields in parsed:
+        name = ini_file.stem
 
         vendor = None
+        vendor_candidates: list[str] = []
         vendor_fields: dict[str, str] = {}
         if "inherits" in fields:
-            vendor = resolve_vendor(vendor_index, section_prefix, fields["inherits"])
+            vendor, vendor_candidates = resolve_vendor(vendor_index, section_prefix, fields["inherits"])
             if vendor:
                 resolved += 1
                 if vendor_src is not None:
@@ -248,8 +319,8 @@ def port_type(
                         vendor_src, vendor, f"{section_prefix}:{fields['inherits']}", vendor_cache
                     )
 
-        # Drop fields the rendered ini can safely omit (see is_own_field).
-        # Vendor bundle wins over compiled defaults.
+        # Drop fields the rendered ini can omit (see is_own_field). Vendor wins
+        # over compiled defaults.
         baseline = {**default_fields, **vendor_fields}
         parent_known = "inherits" not in fields or vendor is not None
         own_fields = {k: v for k, v in fields.items() if is_own_field(k, v, baseline, parent_known)}
@@ -265,7 +336,10 @@ def port_type(
         print(f"{ini_file} -> {out_path}")
         if not dry_run:
             out_dir.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(render(name, own_fields, section_prefix, vendor), encoding="utf-8")
+            out_path.write_text(
+                render(name, own_fields, section_prefix, vendor, vendor_candidates, has_defaults),
+                encoding="utf-8",
+            )
         count += 1
     return count, resolved
 
@@ -299,7 +373,9 @@ def main() -> None:
         help=(
             "flat key=value file of the slicer's compiled defaults (produce with "
             "`prusa-slicer --save defaults.ini`); fields equal to these defaults "
-            "are dropped too, on top of vendor-bundle dedup"
+            "are dropped from each profile, on top of vendor-bundle dedup, and the "
+            "defaults are written as a per-directory _slicer_defaults.nix base layer "
+            "every profile composes under its other layers"
         ),
     )
     parser.add_argument(

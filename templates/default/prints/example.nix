@@ -8,11 +8,11 @@
     layer_height = "0.2";
   };
 
-  # With vendorSrc set (see the main README), layer a vendor preset and this
-  # directory's _common.nix instead of a bare attrset:
-  # value = slicerLib.mergeAttrsListAndWarn [
+  # With vendorSrc set (see the main README), compose a vendor preset and this
+  # directory's _common.nix with `//` (later layers win) instead of a bare
+  # attrset:
+  # value =
   #   (slicerLib.vendorBundles.<Vendor> "print:<Name>")
-  #   (import ./_common.nix)
-  #   { layer_height = "0.2"; }
-  # ];
+  #   // (import ./_common.nix)
+  #   // { layer_height = "0.2"; };
 }

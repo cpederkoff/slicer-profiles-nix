@@ -10,11 +10,11 @@
     bed_temperature = "60";
   };
 
-  # With vendorSrc set (see the main README), layer a vendor preset and this
-  # directory's _common.nix instead of a bare attrset:
-  # value = slicerLib.mergeAttrsListAndWarn [
+  # With vendorSrc set (see the main README), compose a vendor preset and this
+  # directory's _common.nix with `//` (later layers win) instead of a bare
+  # attrset:
+  # value =
   #   (slicerLib.vendorBundles.<Vendor> "filament:<Name>")
-  #   (import ./_common.nix)
-  #   { bed_temperature = "60"; }
-  # ];
+  #   // (import ./_common.nix)
+  #   // { bed_temperature = "60"; };
 }

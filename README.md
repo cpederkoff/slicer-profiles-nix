@@ -5,11 +5,11 @@ Manage Slic3r-derivative slicer profiles - printer, filament, print-quality, and
 * Import your existing PrusaSlicer profiles with one command
 * Profiles as plain Nix attrsets, rendered to read-only `.ini` files
 * Vendor-bundle presets via `inherits =` chain resolution
-* Warns on fields that redundantly repeat an earlier layer
+* Imports keep only what differs, layered over the slicer's compiled defaults
 * Works for any Slic3r-derivative fork (PrusaSlicer, SuperSlicer, ...)
 
 ## Quick start
-Already have profiles saved in PrusaSlicer (or a fork) and use Home Manager? This gets them under Nix in five steps.
+Already have profiles saved in PrusaSlicer (or a fork) and use Home Manager? This gets them under Nix in six steps.
 
 **1. Add the flake input**
 ```nix
@@ -21,12 +21,16 @@ inputs.slicer-profiles-nix.url = "github:cpederkoff/slicer-profiles-nix";
 imports = [ inputs.slicer-profiles-nix.homeModules.default ];
 ```
 
-**3. Back up, scaffold, and import**
+**3. Back up and scaffold**
 ```bash
 cp -r ~/.config/PrusaSlicer ~/.config/PrusaSlicer.bkp
-mkdir -p home/slicer-profiles 
+mkdir -p home/slicer-profiles
 cd home/slicer-profiles
 nix flake init -t github:cpederkoff/slicer-profiles-nix#bare
+```
+
+**4. Generate the slicer's defaults, then import**
+```bash
 prusaslicer="$(nix build --no-link --print-out-paths nixpkgs#prusa-slicer)"
 HOME="$(mktemp -d)" "$prusaslicer/bin/prusa-slicer" --save /tmp/prusaslicer-defaults.ini
 
@@ -37,9 +41,9 @@ nix run github:cpederkoff/slicer-profiles-nix#import-profiles -- \
   --out .
 ```
 
-`--vendor-src` starts each profile from the matching vendor preset and `--defaults-src` drops fields left at PrusaSlicer's compiled defaults, so a saved profile imports as just its meaningful overrides. Both are optional (drop them and every field is written out explicitly). The `prusa-slicer --save` step dumps those defaults from a clean `HOME` using the same `$prusaslicer` build as `--vendor-src`, so the two agree; point both at the same version if you run a different one.
+The first line dumps PrusaSlicer's compiled defaults from a clean `HOME`, using the same `$prusaslicer` build as `--vendor-src` so the two agree (point both at the same version if you run a different one). Then `--vendor-src` starts each profile from the matching vendor preset and `--defaults-src` drops fields left at those defaults, so a saved profile imports as just its meaningful overrides. The dropped defaults aren't lost: the importer writes a `_slicer_defaults.nix` base layer into each of `printers/`, `filaments/`, and `prints/` that every profile there composes under its vendor/`_common`/own layers, so the rendered `.ini` still carries them - just tracked against an explicit base instead of copied into every file. Both flags are optional (drop them and every field is written out explicitly).
 
-**4. Set `configDir` to your slicer**
+**5. Set `configDir` to your slicer**
 
 The scaffolded `profiles.nix` ships with a placeholder:
 ```nix
@@ -47,7 +51,7 @@ configDir = "YourSlicer"; # e.g. "PrusaSlicer", "SuperSlicer"
 ```
 `configDir` is the folder your slicer keeps its profiles in under `~/.config` - it's where the rendered `.ini` files are written, so it must match that directory name exactly. Run `ls ~/.config` if you're unsure.
 
-**5. Wire it into your config**
+**6. Wire it into your config**
 
 The flake needs to be in scope of the module that uses it. The simplest way is to reference `inputs` directly, which Home Manager passes to your modules when you use `extraSpecialArgs` (or `specialArgs` under a NixOS `home-manager.users.*`). If `inputs` isn't already threaded through, add `extraSpecialArgs = { inherit inputs; };` where you call `home-manager.lib.homeManagerConfiguration` (or set it on the NixOS module).
 
@@ -90,14 +94,7 @@ slicerLib = slicer-profiles-nix.lib.mkProfileLib {
   vendorSrc = "${inputs.prusaslicer-src}/resources/profiles";
 };
 ```
-Either source works the same once wired in - bundles are keyed by filename (without `.ini`):
-```nix
-slicerProfiles.directories.filament."My PLA (nix)" = slicerLib.mergeAttrsListAndWarn [
-  (slicerLib.vendorBundles.PrusaResearch "filament:Prusament PLA")
-  { bed_temperature = 65; }
-];
-```
-Don't care about the redundancy warning? A vendor bundle is a plain attrset, so Nix's own `//` merges it just as well:
+Either source works the same once wired in - bundles are keyed by filename (without `.ini`). A vendor bundle is a plain attrset, so compose it with Nix's own `//` (later layers win, so your overrides sit on the right):
 ```nix
 slicerProfiles.directories.filament."My PLA (nix)" =
   slicerLib.vendorBundles.PrusaResearch "filament:Prusament PLA" // { bed_temperature = 65; };

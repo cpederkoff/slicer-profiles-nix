@@ -1,18 +1,16 @@
 { lib }:
 
-# Generic Slic3r-derivative ini tooling. No app/vendor/printer assumptions.
-# `let ... in { }`, not `rec { }` - overriding one returned field can't
-# silently change what another field calls internally.
+# Generic Slic3r-derivative ini tooling; no app/vendor/printer assumptions.
+# Uses `let ... in { }`, not `rec { }`: overriding a returned field MUST NOT
+# change what another field calls internally.
 let
-  # No floats - Nix's toString mangles them ("0.400000"); author those as
-  # strings. Ints are fine, toString on an int is exact.
+  # Callers MUST author decimals as strings, not floats. Nix's toString
+  # mangles floats ("0.400000"); on an int it is exact.
   mkIniValue =
     v:
     if builtins.isString v then
-      # A real newline breaks the flat "key = value" ini - gcode newlines
-      # must be authored as a literal "\n" (backslash-n, two chars), the way
-      # PrusaSlicer writes them. Catch the mistake here instead of silently
-      # emitting a corrupt profile.
+      # Gcode newlines MUST be a literal "\n" (two chars), as PrusaSlicer
+      # writes them. A real newline breaks the flat "key = value" ini.
       if lib.hasInfix "\n" v then
         throw "slicer-profiles-nix: value contains a real newline - gcode newlines must be a literal \"\\n\" (two chars, e.g. \"G28\\nG1 Z5\"), not an actual line break; got: ${v}"
       else
@@ -25,8 +23,8 @@ let
   toSlic3rIni =
     attrs: lib.concatStrings (lib.mapAttrsToList (k: v: "${k} = ${mkIniValue v}\n") attrs);
 
-  # Resolves a [type:Name] section from a vendor .ini bundle, following its
-  # `inherits = Parent;Other` chain. Tolerates CRLF and "key=value" (no space).
+  # Parse a vendor .ini to `{ section = { key = value; }; }`. Tolerates CRLF
+  # and "key=value" (no spaces).
   parseVendorIni =
     path:
     let
@@ -56,6 +54,8 @@ let
       sections = { };
     } lines).sections;
 
+  # Resolve a [type:Name] section, following its `inherits = Parent;Other`
+  # chain. Parents resolve first; own fields win.
   resolveVendorSection =
     sections: name:
     let
@@ -70,14 +70,14 @@ let
     in
     builtins.removeAttrs (inherited // sec) [ "inherits" ];
 
-  # Loads one vendor bundle file; returns a lookup fn, e.g.
-  # `bundle "filament:Esun ABS"`, mirroring the ini's own [filament:...] syntax.
+  # Load one bundle file; return a section lookup, e.g.
+  # `bundle "filament:Esun ABS"`.
   mkVendorBundle =
     vendorSrc: vendorFileName: resolveVendorSection (parseVendorIni "${vendorSrc}/${vendorFileName}");
 
-  # Every "<Vendor>.ini" under vendorSrc, keyed without the extension.
-  # Lazily shared, so each bundle parses at most once no matter how many
-  # profile files read it - mkVendorBundle alone reparses every time.
+  # Every "<Vendor>.ini" under vendorSrc, keyed without the extension. Lazily
+  # shared: each bundle parses at most once, however many profiles read it
+  # (mkVendorBundle alone reparses every call).
   mkVendorBundles =
     vendorSrc:
     lib.mapAttrs'
@@ -90,48 +90,6 @@ let
           builtins.readDir vendorSrc
         )
       );
-
-  # Like lib.mergeAttrsList, but warns (doesn't fail) when a later attrset
-  # redundantly repeats an earlier value. To skip the check on content you
-  # don't control, merge it in as a floor instead of putting it in the list:
-  # `base.value // mergeAttrsListAndWarn [ own1 own2 ]`.
-  #
-  # An optional leading string labels the warning with the profile it came
-  # from: `mergeAttrsListAndWarn "My PLA (nix)" [ ... ]`.
-  mergeAttrsListAndWarnNamed =
-    label: layers:
-    let
-      step =
-        acc: value:
-        let
-          keys = builtins.attrNames value;
-          redundantVsLayer = builtins.filter (
-            k: (acc.merged ? ${k}) && (mkIniValue value.${k}) == (mkIniValue acc.merged.${k})
-          ) keys;
-          describeLayer =
-            k: "${k} = ${mkIniValue value.${k}}";
-        in
-        {
-          merged = acc.merged // value;
-          warnings = acc.warnings ++ (map describeLayer redundantVsLayer);
-        };
-      result = lib.foldl' step {
-        merged = { };
-        warnings = [ ];
-      } layers;
-      header =
-        "slicer-profiles-nix: redundant field overrides safe to delete"
-        + lib.optionalString (label != null) " in ${label}"
-        + ":";
-    in
-    if result.warnings == [ ] then
-      result.merged
-    else
-      lib.warn "${header}\n${lib.concatStringsSep "\n" result.warnings}" result.merged;
-
-  # A leading string is the label; a bare list stays unlabeled.
-  mergeAttrsListAndWarn =
-    arg: if builtins.isString arg then mergeAttrsListAndWarnNamed arg else mergeAttrsListAndWarnNamed null arg;
 in
 {
   inherit
@@ -141,6 +99,5 @@ in
     resolveVendorSection
     mkVendorBundle
     mkVendorBundles
-    mergeAttrsListAndWarn
     ;
 }

@@ -9,11 +9,11 @@
     nozzle_diameter = "0.4";
   };
 
-  # With vendorSrc set (see the main README), layer a vendor preset and this
-  # directory's _common.nix instead of a bare attrset:
-  # value = slicerLib.mergeAttrsListAndWarn [
+  # With vendorSrc set (see the main README), compose a vendor preset and this
+  # directory's _common.nix with `//` (later layers win) instead of a bare
+  # attrset:
+  # value =
   #   (slicerLib.vendorBundles.<Vendor> "printer:<Name>")
-  #   (import ./_common.nix)
-  #   { nozzle_diameter = "0.4"; }
-  # ];
+  #   // (import ./_common.nix)
+  #   // { nozzle_diameter = "0.4"; };
 }
