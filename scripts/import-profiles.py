@@ -140,9 +140,7 @@ def is_own_field(key: str, value: str, baseline: dict[str, str], parent_known: b
     # parent might set it, so keep it.
     if key in baseline:
         return unset_canon(baseline[key]) != unset_canon(value)
-    if unset_canon(value) == "" and parent_known:
-        return False
-    return True
+    return not (unset_canon(value) == "" and parent_known)
 
 
 def parse_profile(path: Path) -> dict[str, str]:
