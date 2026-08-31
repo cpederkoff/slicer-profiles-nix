@@ -14,7 +14,7 @@ jobs:
       # No --all-systems: this runner can't build aarch64-darwin at all, or
       # aarch64-linux without emulation. Default check covers what it can.
       - run: nix flake check
-      - run: nix fmt -- --check .
+      - run: nix fmt -- --ci
       # Lint + format-check the importer script (ruff.toml sets the line
       # length). ruff comes from the CI registry's nixpkgs, not the flake pin
       # - it's a dev tool, so a moving version is fine here.
