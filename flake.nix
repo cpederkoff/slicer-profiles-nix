@@ -57,7 +57,7 @@
         description = "slicerProfiles scaffold with no example profiles - empty dirs to fill with import-profiles";
       };
 
-      formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt);
+      formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt-tree);
 
       # Reproducible dump of PrusaSlicer's compiled-in defaults, for
       # `import-profiles --defaults-src`. Pinned to this flake's nixpkgs so it
