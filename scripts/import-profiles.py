@@ -195,7 +195,7 @@ def render(
     if has_defaults:
         entries.append(("layer", "(import ./_slicer_defaults.nix)"))
     if "inherits" in fields:
-        section = f'{section_prefix}:{fields["inherits"]}'
+        section = f"{section_prefix}:{fields['inherits']}"
         if vendor:
             entries.append(("layer", f'(slicerLib.vendorBundles.{vendor} "{section}")'))
         else:
@@ -223,13 +223,7 @@ def render(
         body_lines.extend(text_lines[1:])
     body = "\n".join(body_lines)
 
-    return (
-        "{ slicerLib }:\n"
-        "{\n"
-        f"  name = {nix_string(name)};\n"
-        f"  value =\n{body};\n"
-        "}\n"
-    )
+    return f"{{ slicerLib }}:\n{{\n  name = {nix_string(name)};\n  value =\n{body};\n}}\n"
 
 
 def common_stub() -> str:
